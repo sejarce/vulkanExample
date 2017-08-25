@@ -38,6 +38,7 @@ struct SwapChainSupportDetails {
 	std::vector<VkPresentModeKHR> presentModes;	//有效的presentation模式
 };
 
+//顶点
 struct Vertex {
 	glm::vec2 pos;
 	glm::vec3 color;
@@ -178,12 +179,12 @@ private:
 	void createCommandBuffers();
 
 	/*
-	*@brief 
+	*@brief
 	*/
 	void createSemaphores();
 
 	/*
-	*@brief
+	*@brief 循环绘制
 	*/
 	void drawFrame();
 
@@ -193,14 +194,26 @@ private:
 	void recreateSwapChain();
 
 	/*
-	*@
+	*@brief 清空交换链
 	*/
 	void cleanupSwapChain();
 
 	/*
-	*@
+	*@brief 创建顶点缓冲区
 	*/
 	void createVertexBuffer();
+
+	/*
+	*@brief
+	*/
+	void createVertexBuffer2();
+
+	/*
+	*@brief
+	*/
+	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
+
+	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
 	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
 
