@@ -11,9 +11,9 @@ const int WIDTH = 800;
 const int HEIGHT = 600;
 
 const std::vector<Vertex> g_vertices = {
-	{ { 0.0f, -0.5f }, { 1.0f, 0.0f, 0.0f } },
-	{ { 0.5f, 0.5f }, { 0.0f, 1.0f, 0.0f } },
-	{ { -0.5f, 0.5f }, { 0.0f, 0.0f, 1.0f } }
+	{ { 0.0f, -0.5f, 0.f }, { 1.0f, 0.0f, 0.0f } },
+	{ { 0.5f, 0.5f, 0.f }, { 0.0f, 1.0f, 0.0f } },
+	{ { -0.5f, 0.5f, 0.f }, { 0.0f, 0.0f, 1.0f } }
 };
 
 VkResult CreateDebugReportCallbackEXT(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT* pCreateInfo, const	VkAllocationCallbacks* pAllocator, VkDebugReportCallbackEXT* pCallback)
@@ -49,6 +49,12 @@ VulkanApplication::~VulkanApplication()
 {
 }
 
+/*
+*1.	初始化windowx相关（与vulkan无关部分）
+*2.	vulkan初始化
+*3.	frame主循环
+*4.	资源回收与释放
+*/
 void VulkanApplication::run()
 {
 	initWindow(800,600);
@@ -57,8 +63,25 @@ void VulkanApplication::run()
 	uninit();
 }
 
+/*
+*1.	showVkExtensions
+*2.	vkCreateInstance
+*3.	createSurface
+*4.	选择一个物理GPU设备
+*5.	创建一个逻辑设备与物理设备交互
+*6.	创建交换链
+*7.	为每个Image创建ImageView
+*8.	创建RenderPass
+*9.	创建图形管线
+*10.创建Framebuffer,为每个VkImage创建对应的VkFragment对象，其attachments指向VkImageView
+*11.创建commandpool来缓存command
+*12.创建vectexBuffer
+*13.创建commandbuffer
+*14.创建信号量Semaphore, 由于绘图和交换的操作的都是异步的，这里需要创建信号量来指示可用的image和渲染完成的状态
+*/
 void VulkanApplication::initVulkan()
 {
+	showVkExtensions();
 	createInstance();
 
 	//setupDebugCallback();
@@ -81,7 +104,7 @@ void VulkanApplication::initVulkan()
 
 	createCommandPool();
 
-	createVertexBuffer2();
+	createVertexBuffer();
 
 	createCommandBuffers();
 
@@ -170,20 +193,19 @@ void VulkanApplication::createInstance()
 
 	createInfo.enabledLayerCount = 0;
 
-	uint32_t extensionCount = 0;
-	vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
-	std::vector<VkExtensionProperties> extensions(extensionCount);
-	vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data());
+	//uint32_t extensionCount = 0;
+	//vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
+	//std::vector<VkExtensionProperties> extensions(extensionCount);
+	//vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data());
 
-	std::cout << "available extensions:" << std::endl;
-	for (const auto& extension : extensions) {
-		std::cout << "\t" << extension.extensionName << std::endl;
-	}
+	//std::cout << "available extensions:" << std::endl;
+	//for (const auto& extension : extensions) {
+	//	std::cout << "\t" << extension.extensionName << std::endl;
+	//}
 
 	//auto extensions = getRequiredExtensions();
 	//createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
 	//createInfo.ppEnabledExtensionNames = extensions.data();
-
 	//if (enableValidationLayers)
 	//{
 	//	createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
@@ -193,12 +215,23 @@ void VulkanApplication::createInstance()
 	//{
 	//	createInfo.enabledLayerCount = 0;
 	//}
-
-
-
+	
 	VkResult res = vkCreateInstance(&createInfo, nullptr, &instance_);
 	if (res != VK_SUCCESS)
 		throw std::runtime_error("failed to create instance!");
+}
+
+void VulkanApplication::showVkExtensions()
+{
+	uint32_t extensionCount = 0;
+	vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
+	std::vector<VkExtensionProperties> extensions(extensionCount);
+	vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, extensions.data());
+
+	std::cout << "available extensions:" << std::endl;
+	for (const auto& extension : extensions) {
+		std::cout << "\t" << extension.extensionName << std::endl;
+	}
 }
 
 std::vector<const char*> VulkanApplication::getRequiredExtensions()
@@ -228,7 +261,7 @@ bool VulkanApplication::checkValidationLayerSupport()
 	std::vector<VkLayerProperties> availableLayers(layerCount);
 	vkEnumerateInstanceLayerProperties(&layerCount, availableLayers.data());
 
-	for (const char* layerName : validationLayers) {
+	for (const char* layerName : c_validationLayers) {
 		bool layerFound = false;
 
 		for (const auto& layerProperties : availableLayers) {
@@ -246,6 +279,10 @@ bool VulkanApplication::checkValidationLayerSupport()
 	return true;
 }
 
+/*
+*1.	枚举出所有的物理GPU device
+*2.	遍历list,找出一个程序最合适的device
+*/
 void VulkanApplication::pickPhtsicalDevice()
 {
 	uint32_t deviceCount = 0;
@@ -258,28 +295,28 @@ void VulkanApplication::pickPhtsicalDevice()
 	vkEnumeratePhysicalDevices(instance_, &deviceCount, devices.data());
 
 	// Use an ordered map to automatically sort candidates by increasing score
-	//std::multimap<int, VkPhysicalDevice> candidates;
-	//for (const auto& device : devices)
-	//{
-	//	int score = rateDeviceSuitability(device);
-	//	candidates.insert(std::make_pair(score, device));
-	//}
-	//// Check if the best candidate is suitable at all
-	//if (candidates.rbegin()->first > 0) {
-	//	physicalDevice_ = candidates.rbegin()->second;
-	//}
-	//else {
-	//	throw std::runtime_error("failed to find a suitable GPU!");
-	//}
-
+	std::multimap<int, VkPhysicalDevice> candidates;
 	for (const auto& device : devices)
 	{
-		if (isDeviceSuitable(device))
-		{
-			physicalDevice_ = device;
-			break;
-		}
+		int score = rateDeviceSuitability(device);
+		candidates.insert(std::make_pair(score, device));
 	}
+	// Check if the best candidate is suitable at all
+	if (candidates.rbegin()->first > 0) {
+		physicalDevice_ = candidates.rbegin()->second;
+	}
+	else {
+		throw std::runtime_error("failed to find a suitable GPU!");
+	}
+
+	//for (const auto& device : devices)
+	//{
+	//	if (isDeviceSuitable(device))
+	//	{
+	//		physicalDevice_ = device;
+	//		break;
+	//	}
+	//}
 
 	if (physicalDevice_ == VK_NULL_HANDLE)
 		throw std::runtime_error("failed to find a suitable GPU!");
@@ -377,6 +414,11 @@ QueueFamilyIndices VulkanApplication::findQueueFamilies(VkPhysicalDevice device)
 	return indices;
 }
 
+/*
+*1.	获取物理设备上的可用的队列信息,findQueueFamilies
+*2.	vkCreateDevice
+*3.	获取图形队列句柄、呈现队列句柄
+*/
 void VulkanApplication::createLogicalDevice()
 {
 	QueueFamilyIndices indices = findQueueFamilies(physicalDevice_);
@@ -393,7 +435,7 @@ void VulkanApplication::createLogicalDevice()
 		queueCreateInfo.pQueuePriorities = &queuePriority;
 		queueCreateInfos.push_back(queueCreateInfo);
 	}
-
+	
 	VkPhysicalDeviceFeatures deviceFeatures = {};
 
 	VkDeviceCreateInfo createInfo = {};
@@ -404,12 +446,12 @@ void VulkanApplication::createLogicalDevice()
 
 	createInfo.pEnabledFeatures = &deviceFeatures;
 
-	createInfo.enabledExtensionCount = static_cast<uint32_t>(deviceExtensions.size());
-	createInfo.ppEnabledExtensionNames = deviceExtensions.data();
+	createInfo.enabledExtensionCount = static_cast<uint32_t>(c_deviceExtensions.size());
+	createInfo.ppEnabledExtensionNames = c_deviceExtensions.data();
 
 	if (enableValidationLayers) {
-		createInfo.enabledLayerCount = static_cast<uint32_t>(validationLayers.size());
-		createInfo.ppEnabledLayerNames = validationLayers.data();
+		createInfo.enabledLayerCount = static_cast<uint32_t>(c_validationLayers.size());
+		createInfo.ppEnabledLayerNames = c_validationLayers.data();
 	}
 	else {
 		createInfo.enabledLayerCount = 0;
@@ -444,12 +486,20 @@ void VulkanApplication::createSurface()
 #endif
 }
 
+/*
+*1.	querySwapChainSupport,查询物理设备对交换链的支持详情
+*2.	vkCreateSwapchainKHR，创建交换链
+*3.	vkGetSwapchainImagesKHR，获取交换链所包含的image引用
+*/
 void VulkanApplication::createSwapChain()
 {
 	SwapChainSupportDetails swapChainSupport = querySwapChainSupport(physicalDevice_);
 
+	//选择（设置）surface的像素格式
 	VkSurfaceFormatKHR surfaceFormat = chooseSwapSurfaceFormat(swapChainSupport.formats);
+	//选择（设置）surface呈现模式
 	VkPresentModeKHR presentMode = chooseSwapPresentMode(swapChainSupport.presentModes);
+	//选择（设置）swapsurface的size
 	VkExtent2D extent = chooseSwapExtent(swapChainSupport.capabilities);
 
 	uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
@@ -508,7 +558,7 @@ bool VulkanApplication::checkDeviceExtensionSupport(VkPhysicalDevice device)
 	std::vector<VkExtensionProperties> availableExtensions(extensionCount);
 	vkEnumerateDeviceExtensionProperties(device, nullptr, &extensionCount, availableExtensions.data());
 
-	std::set<std::string> requiredExtensions(deviceExtensions.begin(), deviceExtensions.end());
+	std::set<std::string> requiredExtensions(c_deviceExtensions.begin(), c_deviceExtensions.end());
 
 	for (const auto& extension : availableExtensions) {
 		requiredExtensions.erase(extension.extensionName);
@@ -779,6 +829,9 @@ void VulkanApplication::createGraphPipeline()
 	vkDestroyShaderModule(device_, vertShaderModule, nullptr);
 }
 
+/*
+*vkCreateShaderModule
+*/
 VkShaderModule VulkanApplication::createShaderModule(const std::vector<char>& code)
 {
 	VkShaderModuleCreateInfo createInfo = {};
@@ -795,6 +848,9 @@ VkShaderModule VulkanApplication::createShaderModule(const std::vector<char>& co
 	return shaderModule;
 }
 
+/*
+*vkCreateRenderPass 需要colorAttachment, subpass
+*/
 void VulkanApplication::createRenderPass()
 {
 	VkAttachmentDescription colorAttachment{};
@@ -822,6 +878,8 @@ void VulkanApplication::createRenderPass()
 	renderPassInfo.pAttachments = &colorAttachment;
 	renderPassInfo.subpassCount = 1;
 	renderPassInfo.pSubpasses = &subpass;
+	renderPassInfo.dependencyCount = 0;
+	renderPassInfo.pDependencies = nullptr;
 
 	if (vkCreateRenderPass(device_, &renderPassInfo, nullptr, &renderPass_) != VK_SUCCESS) {
 		throw std::runtime_error("failed to create render pass!");
@@ -882,9 +940,9 @@ void VulkanApplication::createCommandBuffers()
 	for (size_t i = 0; i < commandBuffers_.size(); i++) {
 		VkCommandBufferBeginInfo beginInfo = {};
 		beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+		beginInfo.flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;	//命令缓冲区也可以重新提交，同时它也在等待执行
 
-		vkBeginCommandBuffer(commandBuffers_[i], &beginInfo);
+		vkBeginCommandBuffer(commandBuffers_[i], &beginInfo);	//开始记录
 
 		VkRenderPassBeginInfo renderPassInfo = {};
 		renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
@@ -897,19 +955,20 @@ void VulkanApplication::createCommandBuffers()
 		renderPassInfo.clearValueCount = 1;
 		renderPassInfo.pClearValues = &clearColor;
 
-		vkCmdBeginRenderPass(commandBuffers_[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);
+		vkCmdBeginRenderPass(commandBuffers_[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);	//开启渲染通道
 
-		vkCmdBindPipeline(commandBuffers_[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline_);
+		vkCmdBindPipeline(commandBuffers_[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline_);	//绑定图形管线graphicsPipeline_
 
 		VkBuffer vertexBuffers[] = { vertexBuffer_ };
 		VkDeviceSize offsets[] = { 0 };
-		vkCmdBindVertexBuffers(commandBuffers_[i], 0, 1, vertexBuffers, offsets);
+		vkCmdBindVertexBuffers(commandBuffers_[i], 0, 1, vertexBuffers, offsets);	//绑定顶点
 
-		vkCmdDraw(commandBuffers_[i], static_cast<uint32_t>(g_vertices.size()), 1, 0, 0);
+		vkCmdDraw(commandBuffers_[i], static_cast<uint32_t>(g_vertices.size()), 1, 0, 0);	//绘制命令
 		//vkCmdDraw(commandBuffers_[i], 3, 1, 0, 0);
 
-		vkCmdEndRenderPass(commandBuffers_[i]);
-
+		vkCmdEndRenderPass(commandBuffers_[i]);	//结束渲染cmd
+		
+		//结束记录
 		if (vkEndCommandBuffer(commandBuffers_[i]) != VK_SUCCESS) {
 			throw std::runtime_error("failed to record command buffer!");
 		}
@@ -928,6 +987,11 @@ void VulkanApplication::createSemaphores()
 	}
 }
 
+/*
+*1.	从交换链中获取一个图像
+*2.	在帧缓冲区中，使用作为附件的图像来执行命令缓冲区中的命令
+*3.	为了最终呈现，将图像返还到交换链
+*/
 void VulkanApplication::drawFrame()
 {
 	//从交换链中获取一个图像	
@@ -943,7 +1007,6 @@ void VulkanApplication::drawFrame()
 	}
 
 	//在帧缓冲区中，使用作为附件的图像来执行命令缓冲区中的命令
-	//为了最终呈现，将图像返还到交换链
 	VkSubmitInfo submitInfo = {};
 	submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
@@ -976,8 +1039,9 @@ void VulkanApplication::drawFrame()
 
 	presentInfo.pImageIndices = &imageIndex;
 
+	//提交请求呈现交换链中的图像
 	vkQueuePresentKHR(presentQueue_, &presentInfo);
-
+	//等待presentQueue_操作完成。
 	vkQueueWaitIdle(presentQueue_);
 }
 
@@ -1014,7 +1078,7 @@ void VulkanApplication::cleanupSwapChain()
 	vkDestroySwapchainKHR(device_, swapChain_, nullptr);
 }
 
-void VulkanApplication::createVertexBuffer()
+void VulkanApplication::createVertexBuffer2()
 {
 	VkBufferCreateInfo bufferInfo = {};
 	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
@@ -1046,27 +1110,43 @@ void VulkanApplication::createVertexBuffer()
 	vkUnmapMemory(device_, vertexBufferMemory_);
 }
 
-void VulkanApplication::createVertexBuffer2()
+/*
+*1.	createBuffer，包括分配显存
+*2.	内存映射到显存
+*/
+void VulkanApplication::createVertexBuffer()
 {
 	VkDeviceSize bufferSize = sizeof(g_vertices[0]) * g_vertices.size();
 
+	//临时缓冲区
 	VkBuffer stagingBuffer;
 	VkDeviceMemory stagingBufferMemory;
+	//VK_BUFFER_USAGE_TRANSFER_SRC_BIT：缓冲区可以用于源内存传输操作。	
 	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
+	//内存映射到显存,此处可以从显存传输数据到内存data
 	void* data;
 	vkMapMemory(device_, stagingBufferMemory, 0, bufferSize, 0, &data);
 	memcpy(data, g_vertices.data(), (size_t)bufferSize);
 	vkUnmapMemory(device_, stagingBufferMemory);
-
+	
+	//最终的顶点缓冲区
+	//VK_BUFFER_USAGE_TRANSFER_DST_BIT：缓冲区可以用于目标内存传输操作
 	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, vertexBuffer_, vertexBufferMemory_);
 
+	//从一个缓冲区拷贝数据到另一个缓冲区
 	copyBuffer(stagingBuffer, vertexBuffer_, bufferSize);
 
+	//清理临时缓冲区，释放显存
 	vkDestroyBuffer(device_, stagingBuffer, nullptr);
 	vkFreeMemory(device_, stagingBufferMemory, nullptr);
 }
 
+/*
+*1.	vkCreateBuffer,创建一个buffer句柄
+*2.	vkAllocateMemory，给buffer内容分配显存
+*3.	vkBindBufferMemory,绑定buffer与显存
+*/
 void VulkanApplication::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory)
 {
 	VkBufferCreateInfo bufferInfo = {};
@@ -1093,9 +1173,13 @@ void VulkanApplication::createBuffer(VkDeviceSize size, VkBufferUsageFlags usage
 
 	vkBindBufferMemory(device_, buffer, bufferMemory, 0);
 }
-
+/*
+*
+*/
 void VulkanApplication::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size)
 {
+	//使用命令缓冲区执行内存传输的操作命令，就像绘制命令一样:
+	//需要分配一个临时命令缓冲区commandBuffer
 	VkCommandBufferAllocateInfo allocInfo = {};
 	allocInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
 	allocInfo.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
@@ -1105,16 +1189,17 @@ void VulkanApplication::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDev
 	VkCommandBuffer commandBuffer;
 	vkAllocateCommandBuffers(device_, &allocInfo, &commandBuffer);
 
+	//立即使用命令缓冲进行记录
 	VkCommandBufferBeginInfo beginInfo = {};
 	beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-
+	beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;	//只需要使用一次命令缓冲区
 	vkBeginCommandBuffer(commandBuffer, &beginInfo);
 
+	//缓冲区内容使用vkCmdCopyBuffer命令传输，拷贝命令
 	VkBufferCopy copyRegion = {};
 	copyRegion.size = size;
 	vkCmdCopyBuffer(commandBuffer, srcBuffer, dstBuffer, 1, &copyRegion);
-
+	//停止记录
 	vkEndCommandBuffer(commandBuffer);
 
 	VkSubmitInfo submitInfo = {};
@@ -1122,9 +1207,14 @@ void VulkanApplication::copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDev
 	submitInfo.commandBufferCount = 1;
 	submitInfo.pCommandBuffers = &commandBuffer;
 
+	//执行命令缓冲区完成传输,提交队列
 	vkQueueSubmit(graphicsQueue_, 1, &submitInfo, VK_NULL_HANDLE);
+	//这里有同样有两个方式等待传输命令完成。
+	//我们可以使用vkWaitForFences等待栅栏fence
+	//或者只是使用vkQueueWaitIdle等待传输队列状态变为idle
 	vkQueueWaitIdle(graphicsQueue_);
 
+	//清理命令缓冲区
 	vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
 }
 

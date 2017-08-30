@@ -10,10 +10,10 @@
 #include <array>
 
 //设备扩展清单
-const std::vector<const char*> validationLayers = {
-	"VK_LAYER_LUNARG_standard_validation" };	//validation layers的列表
+const std::vector<const char*> c_validationLayers = {
+	"VK_LAYER_LUNARG_standard_validation" };	//validation layers(校验层)的列表
 
-const std::vector<const char*> deviceExtensions = {
+const std::vector<const char*> c_deviceExtensions = {
 	VK_KHR_SWAPCHAIN_EXTENSION_NAME				//VK_KHR_swapchain设备级别的扩展
 };
 
@@ -40,7 +40,7 @@ struct SwapChainSupportDetails {
 
 //顶点
 struct Vertex {
-	glm::vec2 pos;
+	glm::vec3 pos;
 	glm::vec3 color;
 
 	static VkVertexInputBindingDescription getBindingDescription() 
@@ -58,12 +58,12 @@ struct Vertex {
 		std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
 		attributeDescriptions[0].binding = 0;
 		attributeDescriptions[0].location = 0;
-		attributeDescriptions[0].format = VK_FORMAT_R32G32_SFLOAT;
+		attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
 		attributeDescriptions[0].offset = offsetof(Vertex, pos);
 
 		attributeDescriptions[1].binding = 0;
 		attributeDescriptions[1].location = 1;
-		attributeDescriptions[1].format = VK_FORMAT_R32G32_SFLOAT;
+		attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
 		attributeDescriptions[1].offset = offsetof(Vertex, color);
 
 		return attributeDescriptions;
@@ -92,6 +92,11 @@ private:
 	*@brief Creating an instance, 创建一个intance去初始化Vulkan library
 	*/
 	void createInstance();
+
+	/*
+	*@brief show vkExtensions
+	*/
+	void showVkExtensions();
 
 	std::vector<const char*> getRequiredExtensions();
 
@@ -209,10 +214,18 @@ private:
 	void createVertexBuffer2();
 
 	/*
-	*@brief
+	*@brief 创建缓冲区
+	*@param:[in] size:	缓冲区大小
+	*		[in] usage
+	*		[in] properties:	内存属性
+	*		[out]	buffer:	buffer句柄
+	*		[out]	bufferMemory：	显存句柄
 	*/
 	void createBuffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags properties, VkBuffer& buffer, VkDeviceMemory& bufferMemory);
 
+	/*
+	*@brief 从一个缓冲区拷贝数据到另一个缓冲区
+	*/
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
 	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
@@ -259,7 +272,7 @@ private:
 	VkPhysicalDevice	physicalDevice_ = VK_NULL_HANDLE;	//物理设备句柄
 	VkDevice			device_;	//逻辑设备句柄
 	VkQueue				graphicsQueue_;	//图形队列句柄
-	VkQueue				presentQueue_;	//描述队列句柄
+	VkQueue				presentQueue_;	//呈现队列句柄
 	
 	VkSwapchainKHR swapChain_;	//交换链对象
 	std::vector<VkImage> swapChainImages_;	//VkImage句柄集
