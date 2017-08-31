@@ -42,6 +42,7 @@ struct SwapChainSupportDetails {
 struct Vertex {
 	glm::vec3 pos;
 	glm::vec3 color;
+	glm::vec2 texCoord;
 
 	static VkVertexInputBindingDescription getBindingDescription() 
 	{
@@ -53,9 +54,9 @@ struct Vertex {
 		return bindingDescription;
 	}
 
-	static std::array<VkVertexInputAttributeDescription, 2> getAttributeDescriptions() 
+	static std::array<VkVertexInputAttributeDescription, 3> getAttributeDescriptions() 
 	{
-		std::array<VkVertexInputAttributeDescription, 2> attributeDescriptions{};
+		std::array<VkVertexInputAttributeDescription, 3> attributeDescriptions{};
 		attributeDescriptions[0].binding = 0;
 		attributeDescriptions[0].location = 0;
 		attributeDescriptions[0].format = VK_FORMAT_R32G32B32_SFLOAT;
@@ -65,6 +66,11 @@ struct Vertex {
 		attributeDescriptions[1].location = 1;
 		attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
 		attributeDescriptions[1].offset = offsetof(Vertex, color);
+
+		attributeDescriptions[2].binding = 0;
+		attributeDescriptions[2].location = 2;
+		attributeDescriptions[2].format = VK_FORMAT_R32G32_SFLOAT;
+		attributeDescriptions[2].offset = offsetof(Vertex, texCoord);
 
 		return attributeDescriptions;
 	}
@@ -162,6 +168,16 @@ private:
 	void createImagesViews();
 
 	/*
+	*@brief
+	*/
+	void createTextureImageView();
+
+	/*
+	*@brief 配置纹理采样器
+	*/
+	void createTextureSampler();
+
+	/*
 	*@brief 创建layout（uniform）
 	*/
 	void createDescriptorSetLayout();
@@ -222,6 +238,26 @@ private:
 	void cleanupSwapChain();
 
 	/*
+	*@brief 加载图片和提交到Vulkan图像对象
+	*/
+	void createTextureImage();
+
+	/*
+	*@brief 图像创建函数
+	*/
+	void createImage(uint32_t width, uint32_t height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage, VkMemoryPropertyFlags properties, VkImage& image, VkDeviceMemory& imageMemory);
+
+	/*
+	*@brief image布局变换:	用于处理图像变换是使用 image memory barrier
+	*/
+	void transitionImageLayout(VkImage image, VkFormat format, VkImageLayout oldLayout, VkImageLayout newLayout);
+
+	/*
+	*@brief 
+	*/
+	void copyBufferToImage(VkBuffer buffer, VkImage image, uint32_t width, uint32_t height);
+
+	/*
 	*@brief 创建顶点缓冲区
 	*/
 	void createVertexBuffer();
@@ -267,6 +303,21 @@ private:
 	void copyBuffer(VkBuffer srcBuffer, VkBuffer dstBuffer, VkDeviceSize size);
 
 	uint32_t findMemoryType(uint32_t typeFilter, VkMemoryPropertyFlags properties);
+
+	/*
+	*@brief 开始一次commandBuffer执行
+	*/
+	VkCommandBuffer beginSingleTimeCommands();
+
+	/*
+	*@brief 一次commandBuffer执行完毕
+	*/
+	void endSingleTimeCommands(VkCommandBuffer commandBuffer);
+
+	/*
+	*@brief 创建imageview
+	*/
+	VkImageView createImageView(VkImage image, VkFormat format);
 
 	static std::vector<char> readFile(const std::string& filename)
 	{
@@ -318,6 +369,9 @@ private:
 	VkExtent2D swapChainExtent_;		//交换链范围
 
 	std::vector<VkImageView> swapChainImageViews_;//图像视图的句柄集
+	
+	VkImageView textureImageView_;	//贴图图像
+	VkSampler textureSampler_;	//纹理采样器
 
 	VkRenderPass	 renderPass_;
 
@@ -345,5 +399,8 @@ private:
 
 	VkBuffer uniformBuffer_;
 	VkDeviceMemory uniformBufferMemory_;
+
+	VkImage textureImage_;
+	VkDeviceMemory textureImageMemory_;
 };
 
