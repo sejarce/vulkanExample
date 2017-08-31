@@ -70,6 +70,14 @@ struct Vertex {
 	}
 };
 
+//uniform
+struct UniformBufferObject
+{
+	glm::mat4	model;
+	glm::mat4	view;
+	glm::mat4	project;
+};
+
 class VulkanApplication
 {
 public:
@@ -154,6 +162,11 @@ private:
 	void createImagesViews();
 
 	/*
+	*@brief 创建layout（uniform）
+	*/
+	void createDescriptorSetLayout();
+
+	/*
 	*@brief 创建图形流水线
 	*/
 	void createGraphPipeline();
@@ -189,6 +202,11 @@ private:
 	void createSemaphores();
 
 	/*
+	*@brief 更新Uniform
+	*/
+	void updateUniformBuffer();
+
+	/*
 	*@brief 循环绘制
 	*/
 	void drawFrame();
@@ -208,6 +226,26 @@ private:
 	*/
 	void createVertexBuffer();
 
+	/*
+	*@brief 创建索引缓冲区
+	*/
+	void createIndexBuffer();
+
+	/*
+	*@brief 创建Uniform缓冲区
+	*/
+	void createUniformBuffer();
+
+	/*
+	*@brief 创建描述符对象池
+	*/
+	void createDescriptorPool();
+
+	/*
+	*@brief	从对象池中分配描述符集合
+	*/
+	void createDescriptorSet();
+	
 	/*
 	*@brief
 	*/
@@ -281,8 +319,11 @@ private:
 
 	std::vector<VkImageView> swapChainImageViews_;//图像视图的句柄集
 
-	VkPipelineLayout pipelineLayout_;
 	VkRenderPass	 renderPass_;
+
+	VkDescriptorSetLayout descriptorSetLayout_;
+	VkPipelineLayout pipelineLayout_;
+
 	VkPipeline		 graphicsPipeline_;
 
 	std::vector<VkFramebuffer>	swapChainFramebuffers_;
@@ -290,10 +331,19 @@ private:
 	VkCommandPool commandPool_;
 	std::vector<VkCommandBuffer> commandBuffers_;
 
+	VkDescriptorPool descriptorPool_;
+	VkDescriptorSet descriptorSet_;
+
 	VkSemaphore imageAvailableSemaphore_;	//准备进行渲染信号量
 	VkSemaphore renderFinishedSemaphore_;	//渲染结束信号量
 
 	VkBuffer vertexBuffer_;
 	VkDeviceMemory vertexBufferMemory_;
+
+	VkBuffer indexBuffer_;
+	VkDeviceMemory indexBufferMemory_;
+
+	VkBuffer uniformBuffer_;
+	VkDeviceMemory uniformBufferMemory_;
 };
 

@@ -7,13 +7,22 @@
 #include <set>
 #include <algorithm>
 
+#include <glm/gtc/matrix_transform.hpp>
+
+#include <chrono>
+
 const int WIDTH = 800;
 const int HEIGHT = 600;
 
 const std::vector<Vertex> g_vertices = {
-	{ { 0.0f, -0.5f, 0.f }, { 1.0f, 0.0f, 0.0f } },
-	{ { 0.5f, 0.5f, 0.f }, { 0.0f, 1.0f, 0.0f } },
-	{ { -0.5f, 0.5f, 0.f }, { 0.0f, 0.0f, 1.0f } }
+	{ { -0.5f, -0.5f, 0.f }, { 1.0f, 0.0f, 0.0f } },
+	{ { 0.5f, -0.5f, 0.f }, { 0.0f, 1.0f, 0.0f } },
+	{ { 0.5f, 0.5f, 0.f }, { 0.0f, 0.0f, 1.0f } },
+	{ { -0.5f, 0.5f, 0.f }, { 1.0f, 0.0f, 1.0f } }
+};
+
+const std::vector<uint16_t> g_indices = {
+	0, 1, 2, 2, 3, 0
 };
 
 VkResult CreateDebugReportCallbackEXT(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT* pCreateInfo, const	VkAllocationCallbacks* pAllocator, VkDebugReportCallbackEXT* pCallback)
@@ -98,6 +107,8 @@ void VulkanApplication::initVulkan()
 
 	createRenderPass();
 
+	//layout,需要在GraphPipeline之前创建供GraphPipeline使用
+	createDescriptorSetLayout();
 	createGraphPipeline();
 
 	createFramebuffer();
@@ -105,6 +116,11 @@ void VulkanApplication::initVulkan()
 	createCommandPool();
 
 	createVertexBuffer();
+	createIndexBuffer();
+	createUniformBuffer();
+
+	createDescriptorPool();
+	createDescriptorSet();
 
 	createCommandBuffers();
 
@@ -130,6 +146,8 @@ void VulkanApplication::frame()
 	{
 		//CpuTimer ct;
 		glfwPollEvents();
+
+		updateUniformBuffer();
 		drawFrame();
 		//ct.Print();
 	}
@@ -140,6 +158,13 @@ void VulkanApplication::frame()
 void VulkanApplication::uninit()
 {
 	cleanupSwapChain();
+
+	vkDestroyDescriptorSetLayout(device_, descriptorSetLayout_, nullptr);
+	vkDestroyBuffer(device_, uniformBuffer_, nullptr);
+	vkFreeMemory(device_, uniformBufferMemory_, nullptr);
+
+	vkDestroyBuffer(device_, indexBuffer_, nullptr);
+	vkFreeMemory(device_, indexBufferMemory_, nullptr);
 
 	vkDestroyBuffer(device_, vertexBuffer_, nullptr);
 	vkFreeMemory(device_, vertexBufferMemory_, nullptr);
@@ -672,6 +697,25 @@ void VulkanApplication::createImagesViews()
 	}
 }
 
+void VulkanApplication::createDescriptorSetLayout()
+{
+	VkDescriptorSetLayoutBinding uboLayoutBinding = {};
+	uboLayoutBinding.binding = 0;
+	uboLayoutBinding.descriptorCount = 1;
+	uboLayoutBinding.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	uboLayoutBinding.pImmutableSamplers = nullptr;
+	uboLayoutBinding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+
+	VkDescriptorSetLayoutCreateInfo layoutInfo = {};
+	layoutInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layoutInfo.bindingCount = 1;
+	layoutInfo.pBindings = &uboLayoutBinding;
+
+	if (vkCreateDescriptorSetLayout(device_, &layoutInfo, nullptr, &descriptorSetLayout_) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create descriptor set layout!");
+	}
+}
+
 void VulkanApplication::createGraphPipeline()
 {
 	//shader
@@ -731,7 +775,7 @@ void VulkanApplication::createGraphPipeline()
 	viewportInfo.pViewports = &viewport;
 	viewportInfo.scissorCount = 1;
 	viewportInfo.pScissors = &scissor;
-	
+
 	//Rasterizer(光栅化，设置填充模式)
 	VkPipelineRasterizationStateCreateInfo rasterizer{};
 	rasterizer.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
@@ -740,7 +784,7 @@ void VulkanApplication::createGraphPipeline()
 	rasterizer.polygonMode = VK_POLYGON_MODE_FILL;	//填充模式
 	rasterizer.lineWidth = 1.0f;	//任何大于1.0的线宽需要开启GPU的wideLines特性支持。
 	rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
-	rasterizer.frontFace = VK_FRONT_FACE_CLOCKWISE;	//描述front-facing面的顶点的顺序
+	rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;	//描述front-facing面的顶点的顺序
 
 	rasterizer.depthBiasEnable = VK_FALSE;	//若设置为VK_TRUE，光栅化可以通过添加常量或者基于片元的斜率来更改深度值。一些时候对于阴影贴图是有用的
 	rasterizer.depthBiasConstantFactor = 0.0f; // Optional
@@ -794,8 +838,8 @@ void VulkanApplication::createGraphPipeline()
 	//Pipeline layout(uniform)
 	VkPipelineLayoutCreateInfo pipelineLayoutInfo = {};
 	pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-	pipelineLayoutInfo.setLayoutCount = 0; // Optional
-	pipelineLayoutInfo.pSetLayouts = nullptr; // Optional
+	pipelineLayoutInfo.setLayoutCount = 1; // Optional
+	pipelineLayoutInfo.pSetLayouts = &descriptorSetLayout_; // Optional
 	pipelineLayoutInfo.pushConstantRangeCount = 0; // Optional
 	pipelineLayoutInfo.pPushConstantRanges = 0; // Optional
 	if (vkCreatePipelineLayout(device_, &pipelineLayoutInfo, nullptr, &pipelineLayout_) != VK_SUCCESS) {
@@ -959,11 +1003,15 @@ void VulkanApplication::createCommandBuffers()
 
 		vkCmdBindPipeline(commandBuffers_[i], VK_PIPELINE_BIND_POINT_GRAPHICS, graphicsPipeline_);	//绑定图形管线graphicsPipeline_
 
+		vkCmdBindDescriptorSets(commandBuffers_[i], VK_PIPELINE_BIND_POINT_GRAPHICS, pipelineLayout_, 0, 1, &descriptorSet_, 0, nullptr);	//将uniform集合绑定到实际的着色器的uniform
+
 		VkBuffer vertexBuffers[] = { vertexBuffer_ };
 		VkDeviceSize offsets[] = { 0 };
 		vkCmdBindVertexBuffers(commandBuffers_[i], 0, 1, vertexBuffers, offsets);	//绑定顶点
+		vkCmdBindIndexBuffer(commandBuffers_[i], indexBuffer_, 0, VK_INDEX_TYPE_UINT16);	//绑定定点索引
 
-		vkCmdDraw(commandBuffers_[i], static_cast<uint32_t>(g_vertices.size()), 1, 0, 0);	//绘制命令
+		vkCmdDrawIndexed(commandBuffers_[i], static_cast<uint32_t>(g_indices.size()), 1, 0, 0, 0);
+		//vkCmdDraw(commandBuffers_[i], static_cast<uint32_t>(g_vertices.size()), 1, 0, 0);	//绘制命令
 		//vkCmdDraw(commandBuffers_[i], 3, 1, 0, 0);
 
 		vkCmdEndRenderPass(commandBuffers_[i]);	//结束渲染cmd
@@ -985,6 +1033,25 @@ void VulkanApplication::createSemaphores()
 
 		throw std::runtime_error("failed to create semaphores!");
 	}
+}
+
+void VulkanApplication::updateUniformBuffer()
+{
+	static auto startTime = std::chrono::high_resolution_clock::now();
+
+	auto currentTime = std::chrono::high_resolution_clock::now();
+	float time = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - startTime).count() / 1000.0f;
+
+	UniformBufferObject ubo = {};
+	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	ubo.view = glm::lookAt(glm::vec3(100.0f, 100.0f, 100.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	ubo.project = glm::perspective(glm::radians(45.0f), (float)swapChainExtent_.width / (float)swapChainExtent_.height, 1.f, 1000.0f);
+	ubo.project[1][1] *= -1;
+
+	void* data;
+	vkMapMemory(device_, uniformBufferMemory_, 0, sizeof(ubo), 0, &data);
+	memcpy(data, &ubo, sizeof(ubo));
+	vkUnmapMemory(device_, uniformBufferMemory_);
 }
 
 /*
@@ -1124,7 +1191,6 @@ void VulkanApplication::createVertexBuffer()
 	//VK_BUFFER_USAGE_TRANSFER_SRC_BIT：缓冲区可以用于源内存传输操作。	
 	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
 
-	//内存映射到显存,此处可以从显存传输数据到内存data
 	void* data;
 	vkMapMemory(device_, stagingBufferMemory, 0, bufferSize, 0, &data);
 	memcpy(data, g_vertices.data(), (size_t)bufferSize);
@@ -1140,6 +1206,89 @@ void VulkanApplication::createVertexBuffer()
 	//清理临时缓冲区，释放显存
 	vkDestroyBuffer(device_, stagingBuffer, nullptr);
 	vkFreeMemory(device_, stagingBufferMemory, nullptr);
+}
+
+void VulkanApplication::createIndexBuffer()
+{
+	VkDeviceSize bufferSize = sizeof(g_indices[0]) * g_indices.size();
+
+	//临时缓冲区
+	VkBuffer stagingBuffer;
+	VkDeviceMemory stagingBufferMemory;
+	//VK_BUFFER_USAGE_TRANSFER_SRC_BIT：缓冲区可以用于源内存传输操作。	
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, stagingBuffer, stagingBufferMemory);
+
+	void* data;
+	vkMapMemory(device_, stagingBufferMemory, 0, bufferSize, 0, &data);
+	memcpy(data, g_indices.data(), (size_t)bufferSize);
+	vkUnmapMemory(device_, stagingBufferMemory);
+
+	//VK_BUFFER_USAGE_TRANSFER_DST_BIT：缓冲区可以用于目标内存传输操作
+	createBuffer(bufferSize, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, indexBuffer_, indexBufferMemory_);
+
+	//从一个缓冲区拷贝数据到另一个缓冲区
+	copyBuffer(stagingBuffer, indexBuffer_, bufferSize);
+
+	//清理临时缓冲区，释放显存
+	vkDestroyBuffer(device_, stagingBuffer, nullptr);
+	vkFreeMemory(device_, stagingBufferMemory, nullptr);
+}
+
+void VulkanApplication::createUniformBuffer()
+{
+	VkDeviceSize bufferSize = sizeof(UniformBufferObject);
+	createBuffer(bufferSize, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, uniformBuffer_, uniformBufferMemory_);
+}
+
+void VulkanApplication::createDescriptorPool()
+{
+	VkDescriptorPoolSize poolSize = {};
+	poolSize.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	poolSize.descriptorCount = 1;
+
+	VkDescriptorPoolCreateInfo poolInfo = {};
+	poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	poolInfo.poolSizeCount = 1;
+	poolInfo.pPoolSizes = &poolSize;
+	poolInfo.maxSets = 1;
+	poolInfo.flags = 0;
+
+	if (vkCreateDescriptorPool(device_, &poolInfo, nullptr, &descriptorPool_) != VK_SUCCESS) {
+		throw std::runtime_error("failed to create descriptor pool!");
+	}
+}
+
+void VulkanApplication::createDescriptorSet()
+{
+	VkDescriptorSetLayout layouts[] = { descriptorSetLayout_ };
+	VkDescriptorSetAllocateInfo allocInfo = {};
+	allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocInfo.descriptorPool = descriptorPool_;
+	allocInfo.descriptorSetCount = 1;
+	allocInfo.pSetLayouts = layouts;
+
+	//
+	if (vkAllocateDescriptorSets(device_, &allocInfo, &descriptorSet_) != VK_SUCCESS) {
+		throw std::runtime_error("failed to allocate descriptor set!");
+	}
+
+	VkDescriptorBufferInfo bufferInfo = {};
+	bufferInfo.buffer = uniformBuffer_;
+	bufferInfo.offset = 0;
+	bufferInfo.range = sizeof(UniformBufferObject);
+
+	VkWriteDescriptorSet descriptorWrite = {};
+	descriptorWrite.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+	descriptorWrite.dstSet = descriptorSet_;
+	descriptorWrite.dstBinding = 0;
+	descriptorWrite.dstArrayElement = 0;
+	descriptorWrite.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	descriptorWrite.descriptorCount = 1;
+	descriptorWrite.pBufferInfo = &bufferInfo;
+	descriptorWrite.pImageInfo = nullptr; // Optional
+	descriptorWrite.pTexelBufferView = nullptr; // Optional
+
+	vkUpdateDescriptorSets(device_, 1, &descriptorWrite, 0, nullptr);
 }
 
 /*
