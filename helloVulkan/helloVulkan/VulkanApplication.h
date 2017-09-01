@@ -41,7 +41,8 @@ struct SwapChainSupportDetails {
 //顶点
 struct Vertex {
 	glm::vec3 pos;
-	glm::vec3 color;
+	glm::vec3 normal;
+	//glm::vec3 color;
 	glm::vec2 texCoord;
 
 	static VkVertexInputBindingDescription getBindingDescription() 
@@ -65,7 +66,7 @@ struct Vertex {
 		attributeDescriptions[1].binding = 0;
 		attributeDescriptions[1].location = 1;
 		attributeDescriptions[1].format = VK_FORMAT_R32G32B32_SFLOAT;
-		attributeDescriptions[1].offset = offsetof(Vertex, color);
+		attributeDescriptions[1].offset = offsetof(Vertex, normal);
 
 		attributeDescriptions[2].binding = 0;
 		attributeDescriptions[2].location = 2;
@@ -94,6 +95,8 @@ public:
 	void run();
 
 private:
+	void loadModel(const std::string& path);
+
 	void initVulkan();
 
 	void initWindow(int width, int height);
@@ -406,6 +409,9 @@ private:
 
 	VkSemaphore imageAvailableSemaphore_;	//准备进行渲染信号量
 	VkSemaphore renderFinishedSemaphore_;	//渲染结束信号量
+
+	std::vector<Vertex>	vertices_;		//顶点数组（顶点，法线，纹理坐标）
+	std::vector<uint32_t> indices_;		//索引数组
 
 	VkBuffer vertexBuffer_;
 	VkDeviceMemory vertexBufferMemory_;

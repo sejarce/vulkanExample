@@ -14,6 +14,10 @@
 
 #include <FreeImage/FreeImage.h>
 
+#include <assimp/Importer.hpp>
+#include <assimp/scene.h>
+#include <assimp/postprocess.h>
+
 #include <chrono>
 
 const int WIDTH = 800;
@@ -31,7 +35,7 @@ const std::vector<Vertex> g_vertices = {
 	{ { -0.5f, 0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.f, 1.f } }
 };
 
-const std::vector<uint16_t> g_indices = {
+const std::vector<uint32_t> g_indices = {
 	0, 1, 2, 2, 3, 0,
 	4, 5, 6, 6, 7, 4
 };
@@ -77,10 +81,55 @@ VulkanApplication::~VulkanApplication()
 */
 void VulkanApplication::run()
 {
+	loadModel("models/h1_obj.obj");
 	initWindow(800,600);
 	initVulkan();
 	frame();
 	uninit();
+}
+
+void VulkanApplication::loadModel(const std::string& path)
+{
+	vertices_.clear();
+	indices_.clear();
+
+	Assimp::Importer importer;
+	const aiScene* scene = importer.ReadFile(path, aiProcess_CalcTangentSpace |
+		aiProcess_Triangulate |
+		aiProcess_JoinIdenticalVertices |
+		aiProcess_SortByPType);
+
+	if (!scene)
+	{
+		throw std::runtime_error("read model file failed!");
+		return;
+	}
+
+	for (auto i = 0; i < scene->mNumMeshes; i++)
+	{
+		aiMesh* mesh = scene->mMeshes[i];
+
+		for (auto j = 0; j < mesh->mNumVertices; j++)
+		{
+			auto pos = mesh->mVertices[j];
+			auto normal = mesh->mNormals[j];
+			auto texCoord = mesh->mTextureCoords[0][j];
+
+			Vertex vertex;
+			vertex.pos = { pos.x, pos.y, pos.z };
+			vertex.normal = { normal.x, normal.y, normal.z };
+			vertex.texCoord = { texCoord.x, texCoord.y };
+
+			vertices_.emplace_back(vertex);
+		}
+
+		for (auto j = 0; j < mesh->mNumFaces; j++)
+		{
+			aiFace& face = mesh->mFaces[j];
+			for (auto k = 0; k < face.mNumIndices; k++)
+				indices_.emplace_back(face.mIndices[k]);
+		}
+	}
 }
 
 /*
@@ -1105,9 +1154,9 @@ void VulkanApplication::createCommandBuffers()
 		VkBuffer vertexBuffers[] = { vertexBuffer_ };
 		VkDeviceSize offsets[] = { 0 };
 		vkCmdBindVertexBuffers(commandBuffers_[i], 0, 1, vertexBuffers, offsets);	//绑定顶点
-		vkCmdBindIndexBuffer(commandBuffers_[i], indexBuffer_, 0, VK_INDEX_TYPE_UINT16);	//绑定定点索引
+		vkCmdBindIndexBuffer(commandBuffers_[i], indexBuffer_, 0, VK_INDEX_TYPE_UINT32);	//绑定定点索引
 
-		vkCmdDrawIndexed(commandBuffers_[i], static_cast<uint32_t>(g_indices.size()), 1, 0, 0, 0);
+		vkCmdDrawIndexed(commandBuffers_[i], static_cast<uint32_t>(indices_.size()), 1, 0, 0, 0);
 		//vkCmdDraw(commandBuffers_[i], static_cast<uint32_t>(g_vertices.size()), 1, 0, 0);	//绘制命令
 		//vkCmdDraw(commandBuffers_[i], 3, 1, 0, 0);
 
@@ -1138,11 +1187,11 @@ void VulkanApplication::updateUniformBuffer()
 
 	auto currentTime = std::chrono::high_resolution_clock::now();
 	float time = std::chrono::duration_cast<std::chrono::milliseconds>(currentTime - startTime).count() / 1000.0f;
-
+	//time = 0.f;
 	UniformBufferObject ubo = {};
-	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-	ubo.view = glm::lookAt(glm::vec3(1.0f, 1.0f, 1.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-	ubo.project = glm::perspective(glm::radians(45.0f), (float)swapChainExtent_.width / (float)swapChainExtent_.height, 0.1f, 10.0f);
+	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+	ubo.view = glm::lookAt(glm::vec3(0.0f, 20.0f, 100.0f), glm::vec3(0.0f, 20.0f, 0.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+	ubo.project = glm::perspective(glm::radians(45.0f), (float)swapChainExtent_.width / (float)swapChainExtent_.height, 1.f, 1000.0f);
 	ubo.project[1][1] *= -1;
 
 	void* data;
@@ -1261,9 +1310,9 @@ void VulkanApplication::createDepthResources()
 void VulkanApplication::createTextureImage()
 {
 	//freeimage读取图片文件
-	const char* imageName = "textures/texture.png";
+	const char* imageName = "textures/h1_obj_C.png";
 	FREE_IMAGE_FORMAT fmt = FreeImage_GetFileType(imageName, 0);
-	FIBITMAP* dib = FreeImage_Load(FIF_PNG, imageName);
+	FIBITMAP* dib = FreeImage_Load(fmt, imageName);
 	if (!dib) {
 		throw std::runtime_error("failed to load texture image!");
 	}
@@ -1443,7 +1492,7 @@ void VulkanApplication::createVertexBuffer2()
 {
 	VkBufferCreateInfo bufferInfo = {};
 	bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-	bufferInfo.size = sizeof(g_vertices[0]) * g_vertices.size();
+	bufferInfo.size = sizeof(vertices_[0]) * vertices_.size();
 	bufferInfo.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
 	bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
@@ -1467,7 +1516,7 @@ void VulkanApplication::createVertexBuffer2()
 
 	void* data;
 	vkMapMemory(device_, vertexBufferMemory_, 0, bufferInfo.size, 0, &data);
-	memcpy(data, g_vertices.data(), (size_t)bufferInfo.size);
+	memcpy(data, vertices_.data(), (size_t)bufferInfo.size);
 	vkUnmapMemory(device_, vertexBufferMemory_);
 }
 
@@ -1477,7 +1526,7 @@ void VulkanApplication::createVertexBuffer2()
 */
 void VulkanApplication::createVertexBuffer()
 {
-	VkDeviceSize bufferSize = sizeof(g_vertices[0]) * g_vertices.size();
+	VkDeviceSize bufferSize = sizeof(vertices_[0]) * vertices_.size();
 
 	//临时缓冲区
 	VkBuffer stagingBuffer;
@@ -1487,7 +1536,7 @@ void VulkanApplication::createVertexBuffer()
 
 	void* data;
 	vkMapMemory(device_, stagingBufferMemory, 0, bufferSize, 0, &data);
-	memcpy(data, g_vertices.data(), (size_t)bufferSize);
+	memcpy(data, vertices_.data(), (size_t)bufferSize);
 	vkUnmapMemory(device_, stagingBufferMemory);
 	
 	//最终的顶点缓冲区
@@ -1504,7 +1553,7 @@ void VulkanApplication::createVertexBuffer()
 
 void VulkanApplication::createIndexBuffer()
 {
-	VkDeviceSize bufferSize = sizeof(g_indices[0]) * g_indices.size();
+	VkDeviceSize bufferSize = sizeof(indices_[0]) * indices_.size();
 
 	//临时缓冲区
 	VkBuffer stagingBuffer;
@@ -1514,7 +1563,7 @@ void VulkanApplication::createIndexBuffer()
 
 	void* data;
 	vkMapMemory(device_, stagingBufferMemory, 0, bufferSize, 0, &data);
-	memcpy(data, g_indices.data(), (size_t)bufferSize);
+	memcpy(data, indices_.data(), (size_t)bufferSize);
 	vkUnmapMemory(device_, stagingBufferMemory);
 
 	//VK_BUFFER_USAGE_TRANSFER_DST_BIT：缓冲区可以用于目标内存传输操作
