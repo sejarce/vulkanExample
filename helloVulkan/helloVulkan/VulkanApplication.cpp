@@ -7,6 +7,9 @@
 #include <set>
 #include <algorithm>
 
+#define GLM_FORCE_RADIANS
+#define GLM_FORCE_DEPTH_ZERO_TO_ONE
+#include <glm/glm.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 #include <FreeImage/FreeImage.h>
@@ -20,11 +23,17 @@ const std::vector<Vertex> g_vertices = {
 	{ { -0.5f, -0.5f, 0.f }, { 1.0f, 0.0f, 0.0f }, { 1.f, 0.f } },
 	{ { 0.5f, -0.5f, 0.f }, { 0.0f, 1.0f, 0.0f }, { 0.f, 0.f } },
 	{ { 0.5f, 0.5f, 0.f }, { 0.0f, 0.0f, 1.0f }, { 0.f, 1.f } },
-	{ { -0.5f, 0.5f, 0.f }, { 1.0f, 0.0f, 1.0f }, { 1.f, 1.f } }
+	{ { -0.5f, 0.5f, 0.f }, { 1.0f, 0.0f, 1.0f }, { 1.f, 1.f } },
+
+	{ { -0.5f, -0.5f, -0.5f }, { 1.0f, 0.0f, 0.0f }, { 1.f, 0.f } },
+	{ { 0.5f, -0.5f, -0.5f }, { 0.0f, 1.0f, 0.0f }, { 0.f, 0.f } },
+	{ { 0.5f, 0.5f, -0.5f }, { 0.0f, 0.0f, 1.0f }, { 0.f, 1.f } },
+	{ { -0.5f, 0.5f, -0.5f }, { 1.0f, 1.0f, 1.0f }, { 1.f, 1.f } }
 };
 
 const std::vector<uint16_t> g_indices = {
-	0, 1, 2, 2, 3, 0
+	0, 1, 2, 2, 3, 0,
+	4, 5, 6, 6, 7, 4
 };
 
 VkResult CreateDebugReportCallbackEXT(VkInstance instance, const VkDebugReportCallbackCreateInfoEXT* pCreateInfo, const	VkAllocationCallbacks* pAllocator, VkDebugReportCallbackEXT* pCallback)
@@ -112,10 +121,11 @@ void VulkanApplication::initVulkan()
 	//layout,需要在GraphPipeline之前创建供GraphPipeline使用
 	createDescriptorSetLayout();
 	createGraphPipeline();
-
-	createFramebuffer();
-
+	
 	createCommandPool();
+
+	createDepthResources();
+	createFramebuffer();
 
 	createTextureImage();
 	createTextureImageView();
@@ -695,13 +705,13 @@ void VulkanApplication::createImagesViews()
 
 	for (size_t i = 0; i < swapChainImages_.size(); i++)
 	{
-		swapChainImageViews_[i] = createImageView(swapChainImages_[i], swapChainImageFormat_);
+		swapChainImageViews_[i] = createImageView(swapChainImages_[i], swapChainImageFormat_, VK_IMAGE_ASPECT_COLOR_BIT);
 	}
 }
 
 void VulkanApplication::createTextureImageView()
 {
-	textureImageView_ = createImageView(textureImage_, VK_FORMAT_R8G8B8A8_UNORM);
+	textureImageView_ = createImageView(textureImage_, VK_FORMAT_R8G8B8A8_UNORM, VK_IMAGE_ASPECT_COLOR_BIT);
 }
 
 void VulkanApplication::createTextureSampler()
@@ -850,6 +860,17 @@ void VulkanApplication::createGraphPipeline()
 
 	//Depth and stencil testing
 
+	VkPipelineDepthStencilStateCreateInfo depthStencil = {};
+	depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
+	depthStencil.depthTestEnable = VK_TRUE;
+	depthStencil.depthWriteEnable = VK_TRUE;
+	depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+	depthStencil.depthBoundsTestEnable = VK_FALSE;
+	depthStencil.minDepthBounds = 0.0f; // Optional
+	depthStencil.maxDepthBounds = 1.0f; // Optional
+	depthStencil.stencilTestEnable = VK_FALSE;
+	depthStencil.front = {}; // Optional
+	depthStencil.back = {}; // Optional
 	//Color blending
 	//有两个结构体用于配置颜色混合。第一个结构体VkPipelineColorBlendAttachmentState包括了每个附加到帧缓冲区的配置。第二个结构体VkPipelineColorBlendStateCreateInfo包含了全局混色的设置
 	//伪代码说明，和gl保持逻辑一致
@@ -903,7 +924,7 @@ void VulkanApplication::createGraphPipeline()
 	pipelineInfo.pViewportState = &viewportInfo;
 	pipelineInfo.pRasterizationState = &rasterizer;
 	pipelineInfo.pMultisampleState = &multisamplingInfo;
-	pipelineInfo.pDepthStencilState = nullptr; // Optional
+	pipelineInfo.pDepthStencilState = &depthStencil; // Optional
 	pipelineInfo.pColorBlendState = &colorBlending;
 	pipelineInfo.pDynamicState = nullptr; // Optional
 	pipelineInfo.layout = pipelineLayout_;
@@ -944,6 +965,7 @@ VkShaderModule VulkanApplication::createShaderModule(const std::vector<char>& co
 */
 void VulkanApplication::createRenderPass()
 {
+	//colorAttachment
 	VkAttachmentDescription colorAttachment{};
 	colorAttachment.format = swapChainImageFormat_;
 	colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
@@ -958,19 +980,45 @@ void VulkanApplication::createRenderPass()
 	colorAttachmentRef.attachment = 0;
 	colorAttachmentRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
 
+	//depthAttachment
+	VkAttachmentDescription depthAttachment = {};
+	depthAttachment.format = findDepthFormat();
+	depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	VkAttachmentReference depthAttachmentRef = {};
+	depthAttachmentRef.attachment = 1;
+	depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+	//子通道
 	VkSubpassDescription subpass = {};
 	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
 	subpass.colorAttachmentCount = 1;
 	subpass.pColorAttachments = &colorAttachmentRef;
+	subpass.pDepthStencilAttachment = &depthAttachmentRef;
 
-	VkRenderPassCreateInfo renderPassInfo{};
+	VkSubpassDependency dependency = {};
+	dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependency.dstSubpass = 0;
+	dependency.srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependency.srcAccessMask = 0;
+	dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+	std::array<VkAttachmentDescription, 2> attachments = { colorAttachment, depthAttachment };
+	VkRenderPassCreateInfo renderPassInfo = {};
 	renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-	renderPassInfo.attachmentCount = 1;
-	renderPassInfo.pAttachments = &colorAttachment;
+	renderPassInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+	renderPassInfo.pAttachments = attachments.data();
 	renderPassInfo.subpassCount = 1;
 	renderPassInfo.pSubpasses = &subpass;
-	renderPassInfo.dependencyCount = 0;
-	renderPassInfo.pDependencies = nullptr;
+	renderPassInfo.dependencyCount = 1;
+	renderPassInfo.pDependencies = &dependency;
 
 	if (vkCreateRenderPass(device_, &renderPassInfo, nullptr, &renderPass_) != VK_SUCCESS) {
 		throw std::runtime_error("failed to create render pass!");
@@ -982,13 +1030,13 @@ void VulkanApplication::createFramebuffer()
 	swapChainFramebuffers_.resize(swapChainImageViews_.size());
 	for (size_t i = 0; i < swapChainFramebuffers_.size(); i++)
 	{
-		VkImageView attachments[] = { swapChainImageViews_[i] };
+		std::array<VkImageView, 2> attachments = { swapChainImageViews_[i], depthImageView_ };
 
 		VkFramebufferCreateInfo framebufferInfo{};
 		framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
 		framebufferInfo.renderPass = renderPass_;
-		framebufferInfo.attachmentCount = 1;
-		framebufferInfo.pAttachments = attachments;
+		framebufferInfo.attachmentCount = static_cast<uint32_t>(attachments.size());
+		framebufferInfo.pAttachments = attachments.data();
 		framebufferInfo.width = swapChainExtent_.width;
 		framebufferInfo.height = swapChainExtent_.height;
 		framebufferInfo.layers = 1;
@@ -1042,9 +1090,11 @@ void VulkanApplication::createCommandBuffers()
 		renderPassInfo.renderArea.offset = { 0, 0 };
 		renderPassInfo.renderArea.extent = swapChainExtent_;
 
-		VkClearValue clearColor = { 0.0f, 0.0f, 0.0f, 1.0f };
-		renderPassInfo.clearValueCount = 1;
-		renderPassInfo.pClearValues = &clearColor;
+		std::array<VkClearValue, 2> clearValues{};
+		clearValues[0].color = { 0.f, 0.f, 0.f, 1.f };
+		clearValues[1].depthStencil = { 1.f, 0 };
+		renderPassInfo.clearValueCount = static_cast<uint32_t>(clearValues.size());
+		renderPassInfo.pClearValues = clearValues.data();
 
 		vkCmdBeginRenderPass(commandBuffers_[i], &renderPassInfo, VK_SUBPASS_CONTENTS_INLINE);	//开启渲染通道
 
@@ -1091,8 +1141,8 @@ void VulkanApplication::updateUniformBuffer()
 
 	UniformBufferObject ubo = {};
 	ubo.model = glm::rotate(glm::mat4(1.0f), time * glm::radians(90.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-	ubo.view = glm::lookAt(glm::vec3(100.0f, 100.0f, 100.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
-	ubo.project = glm::perspective(glm::radians(45.0f), (float)swapChainExtent_.width / (float)swapChainExtent_.height, 1.f, 1000.0f);
+	ubo.view = glm::lookAt(glm::vec3(1.0f, 1.0f, 1.0f), glm::vec3(0.0f, 0.0f, 0.0f), glm::vec3(0.0f, 0.0f, 1.0f));
+	ubo.project = glm::perspective(glm::radians(45.0f), (float)swapChainExtent_.width / (float)swapChainExtent_.height, 0.1f, 10.0f);
 	ubo.project[1][1] *= -1;
 
 	void* data;
@@ -1169,12 +1219,17 @@ void VulkanApplication::recreateSwapChain()
 	createImagesViews();
 	createRenderPass();
 	createGraphPipeline();
+	createDepthResources();
 	createFramebuffer();
 	createCommandBuffers();
 }
 
 void VulkanApplication::cleanupSwapChain()
 {
+	vkDestroyImageView(device_, depthImageView_, nullptr);
+	vkDestroyImage(device_, depthImage_, nullptr);
+	vkFreeMemory(device_, depthImageMemory_, nullptr);
+
 	for (size_t i = 0; i < swapChainFramebuffers_.size(); i++) {
 		vkDestroyFramebuffer(device_, swapChainFramebuffers_[i], nullptr);
 	}
@@ -1190,6 +1245,17 @@ void VulkanApplication::cleanupSwapChain()
 	}
 
 	vkDestroySwapchainKHR(device_, swapChain_, nullptr);
+}
+
+void VulkanApplication::createDepthResources()
+{
+	VkFormat depthFormat = findDepthFormat();
+
+	createImage(swapChainExtent_.width, swapChainExtent_.height, depthFormat, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, depthImage_, depthImageMemory_);
+	depthImageView_ = createImageView(depthImage_, depthFormat, VK_IMAGE_ASPECT_DEPTH_BIT);
+
+	transitionImageLayout(depthImage_, depthFormat, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
 }
 
 void VulkanApplication::createTextureImage()
@@ -1290,7 +1356,19 @@ void VulkanApplication::transitionImageLayout(VkImage image, VkFormat format, Vk
 	barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
 	barrier.image = image;
-	barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+
+	if (newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+
+		if (hasStencilComponent(format)) {
+			barrier.subresourceRange.aspectMask |= VK_IMAGE_ASPECT_STENCIL_BIT;
+		}
+	}
+	else {
+		barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	}
+
+	//barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
 	barrier.subresourceRange.baseMipLevel = 0;
 	barrier.subresourceRange.levelCount = 1;
 	barrier.subresourceRange.baseArrayLayer = 0;
@@ -1312,6 +1390,13 @@ void VulkanApplication::transitionImageLayout(VkImage image, VkFormat format, Vk
 
 		sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
 		destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	}
+	else if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL) {
+		barrier.srcAccessMask = 0;
+		barrier.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+
+		sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+		destinationStage = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
 	}
 	else {
 		throw std::invalid_argument("unsupported layout transition!");
@@ -1620,7 +1705,7 @@ void VulkanApplication::endSingleTimeCommands(VkCommandBuffer commandBuffer)
 	vkFreeCommandBuffers(device_, commandPool_, 1, &commandBuffer);
 }
 
-VkImageView VulkanApplication::createImageView(VkImage image, VkFormat format)
+VkImageView VulkanApplication::createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags)
 {
 	VkImageViewCreateInfo createInfo;
 	createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -1635,7 +1720,7 @@ VkImageView VulkanApplication::createImageView(VkImage image, VkFormat format)
 
 	//subresourceRangle 字段用于描述图像的使用目标是什么，以及可以被访问的有效区域;图像将会作为color targets，没有任何mipmapping levels 或是多层 multiple layers
 	//如果在编写沉浸式的3D应用程序，比如VR，就需要创建支持多层的交换链。并且通过不同的层为每一个图像创建多个视图，以满足不同层的图像在左右眼渲染时对视图的需要
-	createInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	createInfo.subresourceRange.aspectMask = aspectFlags;
 	createInfo.subresourceRange.baseMipLevel = 0;
 	createInfo.subresourceRange.levelCount = 1;
 	createInfo.subresourceRange.baseArrayLayer = 0;
@@ -1648,6 +1733,32 @@ VkImageView VulkanApplication::createImageView(VkImage image, VkFormat format)
 	}
 
 	return imageView;
+}
+
+VkFormat VulkanApplication::findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features)
+{
+	for (VkFormat format : candidates) {
+		VkFormatProperties props;
+		vkGetPhysicalDeviceFormatProperties(physicalDevice_, format, &props);
+
+		if (tiling == VK_IMAGE_TILING_LINEAR && (props.linearTilingFeatures & features) == features) {
+			return format;
+		}
+		else if (tiling == VK_IMAGE_TILING_OPTIMAL && (props.optimalTilingFeatures & features) == features) {
+			return format;
+		}
+	}
+
+	throw std::runtime_error("failed to find supported format!");
+}
+
+VkFormat VulkanApplication::findDepthFormat()
+{
+	return findSupportedFormat(
+	{ VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT },
+	VK_IMAGE_TILING_OPTIMAL,
+	VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT
+	);
 }
 
 void VulkanApplication::setupDebugCallback()

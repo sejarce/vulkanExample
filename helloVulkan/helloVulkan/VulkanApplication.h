@@ -238,6 +238,11 @@ private:
 	void cleanupSwapChain();
 
 	/*
+	*@brief 配置深度图像资源
+	*/
+	void createDepthResources();
+
+	/*
 	*@brief 加载图片和提交到Vulkan图像对象
 	*/
 	void createTextureImage();
@@ -317,7 +322,21 @@ private:
 	/*
 	*@brief 创建imageview
 	*/
-	VkImageView createImageView(VkImage image, VkFormat format);
+	VkImageView createImageView(VkImage image, VkFormat format, VkImageAspectFlags aspectFlags);
+
+	/*
+	*@
+	*/
+	VkFormat findSupportedFormat(const std::vector<VkFormat>& candidates, VkImageTiling tiling, VkFormatFeatureFlags features);
+
+	/*
+	*@
+	*/
+	VkFormat findDepthFormat();
+
+	bool hasStencilComponent(VkFormat format) {
+		return format == VK_FORMAT_D32_SFLOAT_S8_UINT || format == VK_FORMAT_D24_UNORM_S8_UINT;
+	}
 
 	static std::vector<char> readFile(const std::string& filename)
 	{
@@ -369,10 +388,7 @@ private:
 	VkExtent2D swapChainExtent_;		//交换链范围
 
 	std::vector<VkImageView> swapChainImageViews_;//图像视图的句柄集
-	
-	VkImageView textureImageView_;	//贴图图像
-	VkSampler textureSampler_;	//纹理采样器
-
+		
 	VkRenderPass	 renderPass_;
 
 	VkDescriptorSetLayout descriptorSetLayout_;
@@ -402,5 +418,11 @@ private:
 
 	VkImage textureImage_;
 	VkDeviceMemory textureImageMemory_;
+	VkImageView textureImageView_;	//贴图图像
+	VkSampler textureSampler_;	//纹理采样器
+
+	VkImage	depthImage_;
+	VkDeviceMemory depthImageMemory_;
+	VkImageView depthImageView_;
 };
 
