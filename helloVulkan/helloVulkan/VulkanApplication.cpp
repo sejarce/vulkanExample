@@ -210,10 +210,21 @@ void VulkanApplication::frame()
 	while (!glfwWindowShouldClose(window_))
 	{
 		//CpuTimer ct;
+		static long nframe = 0;
+		static clock_t stime = 0;
+		clock_t tim = clock();
+		if (tim - stime > 1000)
+		{
+			stime = tim;
+			printf("fps: %d \r\n", nframe);
+			nframe = 0;
+		}
+
 		glfwPollEvents();
 
 		updateUniformBuffer();
 		drawFrame();
+		nframe++;
 		//ct.Print();
 	}
 
@@ -222,6 +233,11 @@ void VulkanApplication::frame()
 
 void VulkanApplication::uninit()
 {
+	vertices_.clear();
+	std::vector<Vertex>().swap(vertices_);
+	indices_.clear();
+	std::vector<uint32_t>().swap(indices_);
+
 	cleanupSwapChain();
 
 	vkDestroySampler(device_, textureSampler_, nullptr);
